@@ -14,12 +14,10 @@ filenames = os.listdir('./data')
 
 ## load all json files into dataframes and register as tables
 for fn in filenames:
-    df = sqlContext.read.json('file:///home/songxh/si618_midterm_project/data/' + fn)
+    df = sqlContext.read.json('file:///home/songxh/618-projectA/data/' + fn)
+    df = sqlContext.read.json('/user/songxh/' + fn)
     tbname = fn.replace('movie_', '')[:-5]
     df.registerTempTable(tbname)
-
-df = sqlContext.read.json('file:///home/songxh/si618_midterm_project/data/user_ratedmovies-timestamps.json')
-df.registerTempTable(user_ratings)
 
 ## Table names: movies, tags, locations, genres, directors, countries, actors, tags_map, user_ratings
 
@@ -39,3 +37,19 @@ df.registerTempTable(user_ratings)
 ################################################################################
 ## Tasks
 ################################################################################
+# 1.Trend over time
+sql_cmd = """
+SELECT year, AVG(rtAllCriticsRating) AS rtAllCritRating, AVG(rtTopCriticsRating) AS rtTopCritRating,
+       AVG(rtAllCriticsScore) AS rtAllCritScore, AVG(rtTopCriticsScore) AS rtTopCritScore,
+       AVG(rtAudienceRating) AS rtAudRating, AVG(rtAudienceScore) AS rtAudScore
+  FROM movies
+  GROUP BY year
+  ORDER BY year
+"""
+trends = sqlContext.sql(sql_cmd).collect()
+
+# 2.actors/directors with highest average scores, 3 movies or more
+# can also look at the actor/director duos, like Johnny Depp and Tim Burton
+sql_cmd = """
+SELECT 
+  FROM movies JOIN movie_actors AS ma ON movies.id = ma.movieID
