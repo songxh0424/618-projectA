@@ -1,0 +1,56 @@
+\documentclass[11pt]{article}
+\usepackage[a4paper, total={7in, 10.5in}]{geometry}
+\usepackage{graphicx} 
+\setlength{\parskip}{0.2em}
+\setlength\parindent{0pt}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{enumitem}
+\usepackage{amsmath,amsfonts}
+\def\E{\mathbb E}
+\def\R{\mathbb R}
+\def\P{\mathbb P}
+\def\what{\widehat}
+\def\B{\mathcal B}
+\pagenumbering{gobble}
+
+
+\begin{document}
+
+\title{SI 618 Project Proposal}
+\author{Xinghui Song, UMID: 23911656}
+\date{}
+\maketitle
+
+\section*{Goals \& Objectives}
+
+We are now facing an overwhelming amount of choices when it comes to deciding which movie one wants to watch. IMDB and Rotten Tomatoes are arguably the two go-to websites for ratings and other information about movies. Though the different rating systems on these websites can make it more confusing to tell the quality of a movie. On IMDB, users can find two ratings, the user score and the Metascore. Rotten Tomatoes has a rather complex critics rating system that employs a fresh/rotten vote and a 10-scale rating at the same time, while also having a similar system for user reviews as well. This project aims at understanding the differences of these rating systems and attempting to assess their validity. Moreover, movies with polarizing scores across different systems will also be a topic of interest. We will dig into the genres and user assigned tags of these movies and try to find out if there are certain themes that tend to cause huge disagreements in various rating systems. 
+
+\section*{Datasets}
+
+There are six available datasets, covering a wide range of information on over 10,000 movies:
+
+\begin{description}
+	\item [movies] The main dataset. It contains movie IDs, titles and all relevant scores and review counts.
+	\item [movie\_genres] Links movie ID to genres. One movie can have multiple genres.
+	\item [movie\_actors] Links movie ID to actors. Also has a {\tt ranking} column based on the order that actors appear on the movie page on IMDB. 
+	\item [movie\_directors] Links movie ID to directors. 
+	\item [movie\_tags] Links movie ID to tag ID. Each tag has a {\tt tagWeight} value that indicates how many users assigned this tag to the movie. 
+	\item [tags\_map] User assigned tags for each movie.
+\end{description} 
+
+All of them have a column called {\tt movieID} that can be used as unique keys when joining tables. During this project, {\bf movies} will be used as the main dataset, while other tables can be joined to it by using SQL JOIN commands on {\tt movieID}. If {\bf movie\_tags} table is used, then {\bf tags\_map} will also need to be joined by the {\tt tagID} column present in both tags tables. 
+
+\section*{Proposed Analysis}
+
+\begin{enumerate}[label = \alph*)]
+	\item Convert IMDB user scores and Metascores to the same scale, sort all movies by their differences between those two scores and aggregate the results by movie genres/tags. 
+	\item Calculate the differences of Rotten Tomatoes critics ratings and Tomatometer scores. Analyze the distribution of the score difference by computing its mean, variance and mean absolute error. 
+	\item Calculate the differences of IMDB Metascores and Rotten Tomatoes critics ratings and/or Tomatometer scores. Analyze the distribution of the score difference by computing its mean, variance and mean absolute error.
+	\item Investigate the rating trends over time. 
+	\item Use histogram and density plot to visualize the distribution of score difference. 
+\end{enumerate}
+
+Above tasks will be carried out using pyspark and sparksql. 
+
+\end{document}

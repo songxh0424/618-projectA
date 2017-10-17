@@ -1,0 +1,9 @@
+movie-scores/movie_actors.json filter=lfs diff=lfs merge=lfs -text
+movie-scores/movie_countries.json filter=lfs diff=lfs merge=lfs -text
+movie-scores/movie_directors.json filter=lfs diff=lfs merge=lfs -text
+movie-scores/movie_genres.json filter=lfs diff=lfs merge=lfs -text
+movie-scores/movie_locations.json filter=lfs diff=lfs merge=lfs -text
+movie-scores/movie_tags.json filter=lfs diff=lfs merge=lfs -text
+movie-scores/movies.json filter=lfs diff=lfs merge=lfs -text
+movie-scores/tags.json filter=lfs diff=lfs merge=lfs -text
+movie-scores/user_ratedmovies-timestamps.json filter=lfs diff=lfs merge=lfs -text
