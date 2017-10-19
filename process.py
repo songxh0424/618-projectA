@@ -91,3 +91,11 @@ SELECT md.directorName, AVG(m.rtAudienceScore) AS rtAudScore, COUNT(m.id) AS cou
   ORDER BY rtAudScore DESC
 """
 topD_rtAud = sqlContext.sql(sql_rtAud).collect()
+
+# actor/director duos
+sql_duo_base = """
+SELECT *
+  INTO duo_base
+  FROM movies AS m JOIN movie_actors AS ma ON m.id = ma.movieID
+    JOIN movie_directors AS md ON m.id = md.movieID
+"""

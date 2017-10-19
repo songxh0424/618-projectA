@@ -2,4 +2,6 @@
 *.Rout
 *.csv
 *.dat
+*.tsv
+*.json
 
