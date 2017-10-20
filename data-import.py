@@ -40,6 +40,7 @@ df = pd.read_csv('./tsv/movies.tsv', encoding = 'latin1', sep = '\t')
 # np.savez('imdbscores', np.array(imdbscores), np.array(metascores))
 loaded_arrays = np.load('imdbscores.npz')
 imdbscores = loaded_arrays['arr_0']
+imdbscores = [str(int(float(x) * 10)) for x in imdbscores if x != None and x != 'N/A']
 metascores = loaded_arrays['arr_1']
 df['imdbRating'] = pd.Series(imdbscores)
 df['Metascore'] = pd.Series(metascores)

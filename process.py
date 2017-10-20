@@ -1,7 +1,9 @@
 from pyspark import SparkContext
 from pyspark.sql import SQLContext
+import pandas as pd
 import os
 import re
+import pyspark.sql.functions as func
 
 ################################################################################
 ## register tables
@@ -16,6 +18,7 @@ filenames = os.listdir('./movie-scores')
 for fn in filenames:
     df = sqlContext.read.json('file:///home/songxh/618-projectA/movie-scores/' + fn)
     if fn == 'movies.json':
+        # remove years with less than 10 movies and duplicated ids
         df = df.filter(df.year >= 1930).filter(df.year < 2010)
     tbname = fn.replace('movie_', '')[:-5]
     df.registerTempTable(tbname)
@@ -43,12 +46,21 @@ sql_cmd = """
 SELECT year, AVG(rtAllCriticsRating) AS rtAllCritRating, AVG(rtTopCriticsRating) AS rtTopCritRating,
        AVG(rtAllCriticsScore) AS rtAllCritScore, AVG(rtTopCriticsScore) AS rtTopCritScore,
        AVG(rtAudienceRating) AS rtAudRating, AVG(rtAudienceScore) AS rtAudScore,
-       AVG(imdbRating) AS imdbRating, AVG(Metascore) AS metascore
+       AVG(imdbRating) AS imdbRating, AVG(Metascore) AS Metascore, COUNT(id) AS count
   FROM movies
   GROUP BY year
   ORDER BY year
 """
-trends = sqlContext.sql(sql_cmd).collect()
+trends = sqlContext.sql(sql_cmd)
+trends.toPandas().to_csv('output/trends.tsv', sep = '\t', index = False)
+
+# score distribution of each genre
+sql_genre = """
+SELECT m.id, m.year, m.rtAllCriticsScore, m.rtAudienceScore, m.imdbRating, m.Metascore, g.genre
+  FROM movies AS m JOIN genres AS g ON m.id = g.movieID
+"""
+genres = sqlContext.sql(sql_genre)
+genres.toPandas().to_csv('output/genres.tsv', sep = '\t', index = False)
 
 # 2.actors/directors with highest average scores, 3 movies or more
 # can also look at the actor/director duos, like Johnny Depp and Tim Burton
@@ -95,7 +107,61 @@ topD_rtAud = sqlContext.sql(sql_rtAud).collect()
 # actor/director duos
 sql_duo_base = """
 SELECT *
-  INTO duo_base
-  FROM movies AS m JOIN movie_actors AS ma ON m.id = ma.movieID
-    JOIN movie_directors AS md ON m.id = md.movieID
+    FROM movies AS m JOIN actors AS ma ON m.id = ma.movieID
+      JOIN directors AS md ON m.id = md.movieID
+    WHERE ma.ranking <= 10
 """
+duo_base = sqlContext.sql(sql_duo_base)
+duo_base.registerTempTable('duo_base')
+
+# metascore
+sql_duo_meta = """
+SELECT FIRST(directorName) AS directorName, FIRST(actorName) AS actorName,
+       AVG(Metascore) AS Metascore, COUNT(imdbID) AS count
+  FROM duo_base
+  WHERE Metascore != 'N/A'
+  GROUP BY directorID, actorID
+  HAVING count >= 3
+  ORDER BY Metascore DESC
+"""
+duo_meta = sqlContext.sql(sql_duo_meta)
+duo_meta.toPandas().to_csv('output/duo_meta.tsv', sep = '\t', index = False, encoding = 'latin1')
+
+# imdb
+sql_duo_imdb = """
+SELECT FIRST(directorName) AS directorName, FIRST(actorName) AS actorName,
+       AVG(imdbRating) AS imdbRating, COUNT(imdbID) AS count
+  FROM duo_base
+  WHERE imdbRating != 'N/A'
+  GROUP BY directorID, actorID
+  HAVING count >= 3
+  ORDER BY imdbRating DESC
+"""
+duo_imdb = sqlContext.sql(sql_duo_imdb)
+duo_imdb.toPandas().to_csv('output/duo_imdb.tsv', sep = '\t', index = False, encoding = 'latin1')
+
+# tomatometer
+sql_duo_tomato = """
+SELECT FIRST(directorName) AS directorName, FIRST(actorName) AS actorName,
+       AVG(rtAllCriticsScore) AS Tomatometer, COUNT(imdbID) AS count
+  FROM duo_base
+  WHERE rtAllCriticsNumReviews > 0
+  GROUP BY directorID, actorID
+  HAVING count >= 3
+  ORDER BY Tomatometer DESC
+"""
+duo_tomato = sqlContext.sql(sql_duo_tomato)
+duo_tomato.toPandas().to_csv('output/duo_tomato.tsv', sep = '\t', index = False, encoding = 'latin1')
+
+# rt audience 
+sql_duo_rtaud = """
+SELECT FIRST(directorName) AS directorName, FIRST(actorName) AS actorName,
+       AVG(rtAudienceScore) AS rtAudScore, COUNT(imdbID) AS count
+  FROM duo_base
+  WHERE rtAudienceNumRatings > 0
+  GROUP BY directorID, actorID
+  HAVING count >= 3
+  ORDER BY rtAudScore DESC
+"""
+duo_rtaud = sqlContext.sql(sql_duo_rtaud)
+duo_rtaud.toPandas().to_csv('output/duo_rtaud.tsv', sep = '\t', index = False, encoding = 'latin1')
