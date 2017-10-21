@@ -1,0 +1,102 @@
+---
+title: "Analyzing Movies Rating Systems on IMDB and Rotten Tomatoes"
+output: 
+  pdf_document:
+    number_sections: true
+header-includes:
+   - \usepackage{indentfirst}
+   - \usepackage{subfig}
+   - \usepackage{graphicx}
+   - \usepackage{float}
+   - \usepackage{amsmath}
+fontsize: 10pt
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, fig.align = "center", message = FALSE, warning = FALSE, comment = "  ", fig.pos = "H", cache = TRUE)
+library(knitr)
+library(ggplot2)
+library(gridExtra)
+library(GGally)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(readr)
+theme_custom = function(border = FALSE) {
+  t = theme(panel.grid.major=element_line(linetype='dotted',color='lightgrey'),
+       panel.grid.minor=element_blank(),
+       panel.background=element_rect(fill='white'),
+       axis.ticks=element_blank())
+  if(!border) t = t + theme(axis.line = element_blank())
+  return(t)
+}
+```
+
+# Motivation
+
+While it is fun to just go to a movie theatre and hope to be pleasantly surprised by a new release, many people prefer to go to movie review sites
+for recommendations. IMDb and Rotten Tomatoes are arguably two of the most popular websites where people can find reviews and ratings for nearly
+any movie. Both of these websites provide two sets of ratings: critics scores and audience scores. IMDb uses Metascore to represent critics opinions
+while Rotten Tomatoes uses Tomatometer to achieve the same goal. For a single movie, one can get four different scores just within these two websites.
+Therefore it can be confusing to some viewers as to which one to trust, or how to interpret the potentially large differences in scores.
+
+This project aims to obtain insights regarding the interpretation and comparison among these different scoring systems through data analysis and
+visualization. One focus in this project would be to visualize the distributions of scores and see how they vary across the years and across
+different genres. The former can give us a temporal view of the movie qualities according to critics and viewers, while the latter will shed some
+light on whether or not particular genres tend to be favored by critics and/or viewers. This can give viewers a better understanding of where a score
+stands comparing to other movies in the same time or same genre, which is more informative than just looking at the sheer value of a score. Another
+objective of this project is to find out what factors into a movie getting vastly different scores from different sources. For example, Batman v Superman
+received a notoriously low Tomatometer score of 27%, which is almost 40 points than its audience score. It could be interesting to determine if this
+happens more often to movies with certain themes, or maybe even to certain directors. Finally, the project will also presents some rankings of actors
+and directors by averaging the scores of movies they appear in. 
+
+# Data Sources
+
+## IMDb + Rotten Tomatoes Datasets from OCDF
+
+The data can be found and downloaded from the [Open Collaboration Data Factories](http://wiki.urbanhogfarm.com/index.php/IMDb_%2B_Rotten_Tomatoes)
+website. There are 12 data tables in total, but not all of them will be
+used in this project. The datasets are a derivative of the MovieLens 10M dataset published by GroupLens research group, with some additional columns
+added through web scraping. Below is a more detailed description of the tables used in this project:
+
+* **movies**: The main table, containing all ratings and review counts data from Rotten Tomatoes. There is an *id* column that links the main table to
+rest of the tables. Also there is an *imdbID* column that can be used to query IMDb ratings using API. There are 10197 movies in total, all released
+between 1915 to 2011. 
+* **movie_genres**: This table links movie ids to one or more genres from 20 different genres. Each movie averagely has two genres.
+* **movie_actors**: Links movie ids to actors appeared in those movies. Each actor is associated with a ranking variable, which is based
+on the order actors are listed on the movie's IMDb page. Also each actor is associated with a unique id to avoid name confusions.
+* **movie_directors**: Links movie ids to directors. Like the actors table, each director has a unique id.
+
+## OMDB API
+
+
+
+# Data Manipulation Methods
+
+# Analysis and Visualization
+
+### Trends by Year
+
+```{r trends}
+trends = read_delim('output/trends.tsv', delim = '\t')
+ggplot(trends, aes(x = year, y = Metascore)) + geom_line() + theme_custom()
+ggplot(trends, aes(x = year, y = imdbRating)) + geom_line() + theme_custom()
+```
+
+```{r genres, fig.height=6, fig.width=8}
+genres = read_delim("output/genres.tsv", delim = "\t") %>% 
+  mutate(Tomatometer = as.numeric(rtAllCriticsScore), 
+        `RT Audience` = as.numeric(rtAudienceScore), 
+         Metascore = as.numeric(Metascore), `IMDb Score` = imdbRating) %>%
+  filter(genre != "Short") %>% # only one under Short genre and has no Metascore
+  select(genre, Metascore, `IMDb Score`, Tomatometer, `RT Audience`)
+genres_facet = genres %>% gather(key = Rating, value = Score, Metascore:`RT Audience`) %>%
+  filter(!is.na(Score) & Score > 0) %>% 
+  mutate(Rating = factor(Rating, levels = c("Metascore", "IMDb Score", "Tomatometer", "RT Audience")))
+ggplot(genres_facet, aes(genre, Score, color = genre)) + geom_boxplot() + coord_flip() +
+  facet_wrap(~ Rating) + theme_custom() + theme(legend.position = "none")
+```
+
+# Conclusion
+
+
