@@ -1,4 +1,4 @@
-from pyspark import SparkContext
+# from pyspark import SparkContext
 from pyspark.sql import SQLContext
 import pandas as pd
 import os
@@ -8,7 +8,7 @@ import pyspark.sql.functions as func
 ################################################################################
 ## register tables
 ################################################################################
-sc = SparkContext(appName = "movies")
+# sc = SparkContext(appName = "movies")
 sc.setLogLevel("ERROR")
 sqlContext = SQLContext(sc)
 
@@ -42,7 +42,16 @@ for fn in filenames:
 ## Tasks
 ################################################################################
 # 1.Trend over time
-sql_cmd = """
+sql_years = """
+SELECT year, COUNT(imdbID) AS count
+  FROM movies
+  GROUP BY year
+  ORDER BY year
+"""
+years = sqlContext.sql(sql_years)
+years.toPandas().to_csv('output/years.tsv', sep = '\t', index = False)
+
+sql_trends = """
 SELECT year, AVG(rtAllCriticsRating) AS rtAllCritRating, AVG(rtTopCriticsRating) AS rtTopCritRating,
        AVG(rtAllCriticsScore) AS rtAllCritScore, AVG(rtTopCriticsScore) AS rtTopCritScore,
        AVG(rtAudienceRating) AS rtAudRating, AVG(rtAudienceScore) AS rtAudScore,
@@ -51,7 +60,7 @@ SELECT year, AVG(rtAllCriticsRating) AS rtAllCritRating, AVG(rtTopCriticsRating)
   GROUP BY year
   ORDER BY year
 """
-trends = sqlContext.sql(sql_cmd)
+trends = sqlContext.sql(sql_trends)
 trends.toPandas().to_csv('output/trends.tsv', sep = '\t', index = False)
 
 # score distribution of each genre
