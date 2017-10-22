@@ -43,7 +43,9 @@ for fn in filenames:
 ################################################################################
 # 1.Trend over time
 sql_years = """
-SELECT year, COUNT(imdbID) AS count
+SELECT year AS Year, COUNT(imdbID) AS count,
+    SUM(CASE WHEN Metascore = 'N/A' THEN 0 ELSE 1 END) AS Meta_count,
+    SUM(CASE WHEN rtAllCriticsNumReviews > 0 THEN 1 ELSE 0 END) AS Tomato_count
   FROM movies
   GROUP BY year
   ORDER BY year
@@ -52,7 +54,7 @@ years = sqlContext.sql(sql_years)
 years.toPandas().to_csv('output/years.tsv', sep = '\t', index = False)
 
 sql_trends = """
-SELECT year, AVG(rtAllCriticsRating) AS rtAllCritRating, AVG(rtTopCriticsRating) AS rtTopCritRating,
+SELECT year AS Year, AVG(rtAllCriticsRating) AS rtAllCritRating, AVG(rtTopCriticsRating) AS rtTopCritRating,
        AVG(rtAllCriticsScore) AS rtAllCritScore, AVG(rtTopCriticsScore) AS rtTopCritScore,
        AVG(rtAudienceRating) AS rtAudRating, AVG(rtAudienceScore) AS rtAudScore,
        AVG(imdbRating) AS imdbRating, AVG(Metascore) AS Metascore, COUNT(id) AS count
@@ -65,7 +67,7 @@ trends.toPandas().to_csv('output/trends.tsv', sep = '\t', index = False)
 
 # score distribution of each genre
 sql_genre = """
-SELECT m.id, m.year, m.rtAllCriticsScore, m.rtAudienceScore, m.imdbRating, m.Metascore, g.genre
+SELECT m.rtAllCriticsScore, m.rtAudienceScore, m.imdbRating, m.Metascore, g.genre AS Genre
   FROM movies AS m JOIN genres AS g ON m.id = g.movieID
 """
 genres = sqlContext.sql(sql_genre)

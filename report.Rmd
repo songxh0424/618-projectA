@@ -1,5 +1,5 @@
 ---
-title: "Analyzing Movies Rating Systems on IMDB and Rotten Tomatoes"
+title: "Analyzing Movies Rating Systems on \nIMDB and Rotten Tomatoes"
 output: 
   pdf_document:
     number_sections: true
@@ -10,6 +10,7 @@ header-includes:
    - \usepackage{float}
    - \usepackage{amsmath}
 fontsize: 10pt
+urlcolor: blue
 ---
 
 ```{r setup, include=FALSE}
@@ -22,12 +23,45 @@ library(dplyr)
 library(tidyr)
 library(stringr)
 library(readr)
-theme_custom = function(border = FALSE) {
-  t = theme(panel.grid.major=element_line(linetype='dotted',color='lightgrey'),
-       panel.grid.minor=element_blank(),
-       panel.background=element_rect(fill='white'),
-       axis.ticks=element_blank())
-  if(!border) t = t + theme(axis.line = element_blank())
+library(ggthemes)
+library(grid)
+library(scales)
+## theme_custom <- function(border = FALSE) {
+##   t = theme(panel.grid.major=element_line(linetype='dotted',color='lightgrey'),
+##        panel.grid.minor=element_blank(),
+##        panel.background=element_rect(fill='white'),
+##        axis.ticks=element_blank())
+##   if(!border) t = t + theme(axis.line = element_blank())
+##   return(t)
+## }
+
+theme_custom <- function(base_size=10, base_family="helvetica", legend = TRUE) {
+  pos = ifelse(legend, "bottom", "none")
+  t = (theme_foundation(base_size=base_size)
+        + theme(plot.title = element_text(face = "bold",
+                                          size = rel(1.2), hjust = 0.5),
+                text = element_text(),
+                panel.background = element_rect(colour = NA),
+                plot.background = element_rect(colour = NA),
+                panel.border = element_rect(colour = NA),
+                axis.title = element_text(face = "bold",size = rel(1)),
+                axis.title.y = element_text(angle=90,vjust =2),
+                axis.title.x = element_text(vjust = -0.2),
+                axis.text = element_text(), 
+                axis.line = element_blank(),
+                axis.ticks = element_blank(),
+                panel.grid.major=element_line(linetype='dotted',color='lightgrey'),
+                panel.grid.minor = element_blank(),
+                legend.key = element_rect(colour = NA),
+                legend.position = pos,
+                legend.direction = "horizontal",
+                legend.key.size= unit(0.2, "cm"),
+                legend.margin = unit(0, "cm"),
+                legend.title = element_text(face="italic"),
+                plot.margin=unit(c(10,5,5,5),"mm"),
+                strip.background=element_rect(colour="#f0f0f0",fill="#f0f0f0"),
+                strip.text = element_text(face="italic")
+      ))
   return(t)
 }
 ```
@@ -60,41 +94,120 @@ used in this project. The datasets are a derivative of the MovieLens 10M dataset
 added through web scraping. Below is a more detailed description of the tables used in this project:
 
 * **movies**: The main table, containing all ratings and review counts data from Rotten Tomatoes. There is an *id* column that links the main table to
-rest of the tables. Also there is an *imdbID* column that can be used to query IMDb ratings using API. There are 10197 movies in total, all released
-between 1915 to 2011. 
-* **movie_genres**: This table links movie ids to one or more genres from 20 different genres. Each movie averagely has two genres.
-* **movie_actors**: Links movie ids to actors appeared in those movies. Each actor is associated with a ranking variable, which is based
+rest of the tables. Also there is an *imdbID* column that can be used to query IMDb ratings using API.
+* **movie_genres**: This table links movie IDs to one or more genres from 20 different genres. Each movie averagely has two genres.
+* **movie_actors**: Links movie IDs to actors appeared in those movies. Each actor is associated with a *ranking* variable, which is based
 on the order actors are listed on the movie's IMDb page. Also each actor is associated with a unique id to avoid name confusions.
-* **movie_directors**: Links movie ids to directors. Like the actors table, each director has a unique id.
+* **movie_directors**: Links movie IDs to directors. Like the actors table, each director has a unique id.
+
+These tables cover information of 10197 movies from year 1903 to 2011 (Note: There are actually duplicated records in the original dataset.
+After removing them, the number of movies goes down to 9413.). However, years towards both ends of the time frame have much fewer movies than
+years in the middle. For the purpose of having a reasonable volume of movies for each year, we eliminate the years with fewer than 10 movies. As
+a result, the time frame is narrowed to from year 1930 to 2009, with 9357 movies in total. 
 
 ## OMDB API
 
-
+The [OMDB API](http://www.omdbapi.com/) is a RESTful web service to obtain movie information. It can be used to extract a wide range of variables just by
+providing a valid IMDb ID (for movie titles, it takes the format: tt + a seven-digit numeric id). The url request takes the form of 
+"http://www.omdbapi.com/?apikey=xxxxxxxx&i=tt0031381", where "tt0031381" is the IMDb ID of the movie *Gone with the Wind*. The requests return json strings 
+that can be loaded into python and added as additional columns to the main table **movies**. In this case, most data we need are already covered by
+the OCDF dataset. We only need the OMDB API to obtain the Metascores and IMDb user scores. The API requests are made possible thanks to fact that 
+the IMDb ID of each movie is readily available in the main table. By using OMDB API, we pulled the Metascore and IMDb user score for each of the 9357
+movies and stored the data as new columns *Metascore* and *imdbRating*. 
 
 # Data Manipulation Methods
 
+In this section, we will go through the data manipulation I've done to prepare and process the data. Some of these steps are already mentioned in
+**Data Sources** section, and they will be explained in more details here. 
+
+## General Workflow
+
+As mentioned in the previous section, the original data is stored in DAT format. The `read.delim` function in R can import DAT files into R dataframes with ease.
+Before the data is read into R, we first use Vim global command to delete some incorrectly written actor data to ensure there won't be formatting errors when
+exporting the data to TSV or JSON files. After importing the downloaded data files in R, we cleared out duplicated movie records using `dplyr` package.
+The resulting R dataframes were then written as TSV files and imported into python. In python, we added columns *Metascore* and
+*imdbRating* to the main table **movies** using `pandas` module, `requests` module and OMDB API. After the data cleaning, the data stored in pandas
+`DataFrames` were exported as JSON files through the `to_json` method provided by `pandas`. The JSON files are formatted as one record per line so that
+pyspark can directly read them into `DataFrames`. All data manipulation for further analysis are done in SparkSQL. Major steps in this process will be explained
+in more details in following sections.
+
+## Cleaning Data
+
+The data downloaded from OCDF has already undergone some cleaning and reorganization so the data is almost ready to use. Though there are still a few things
+that need to be tidied up. The data cleaning relies on usage of both R and python. As mentioned in the previous section, the original data is stored in DAT
+format. The `read.delim` function in R can import DAT files into R dataframes with ease. 
+
+### Removing messy actor names
+
+The data posted on OCDF has a few additional files than the original MovieLens data. One of them is **movie_actors**. The lists of actors in that table is
+rather complete. Some movies have over 50 actors associated to their IDs. Although some actors' names are not stored in full in **movie_actors** table. All
+of these actors have names like John "Having a Long Nickname" Doe. Values of such names in the DAT file are incomplete strings and often end with ellipses
+that can easily hinder data importation. In order to eliminate these records and avoid getting errors when importing the DAT files, we deleted all lines
+containing these type of actor names using Vim command `:g/\.\.\./d`. Only 389 out of 231742 lines were deleted. Since the deleted actors only take up a
+small portion of the entire table and they usually have very low rankings (much larger than 20), this removal is not expected to have much of an impact on
+our analysis concerning actors.
+
+### Removing duplicated movies
+
+One issue is that there are occasions where different movie IDs point to the same movie (as mentioned briefly in last section). Fortunately we still have the
+IMDb ID that can act as a unique identifier of a movie. This cleaning task can be done using `dplyr`. The `dplyr` package is a very powerful R package 
+designed for data manipulation. In this step, we first use the `group_by` function to segment movies by their unique IMDb IDs, then use `filter` function
+to keep only the first row in each group. Package `dplyr` has a function `row_number` that serves as a hidden "column" for row indices, which is exactly
+what we need in this operation. The R command for this step looks like this:
+
+```r
+df = df %>% group_by(imdbID) %>% filter(row_number() == 1)
+```
+
+## Adding Data from API
+
+This part is fairly straight-forward with the `requests` module. We only need to supply an API token and a valid IMDb ID to the url format to get the
+desired movie scores. The *imdbID* column in table **movies** is of numeric type, whereas a standard movie title ID takes the form "tt + a seven-digit integer".
+Therefore in this step I used the `format` function to pad the imdbID strings with leading zeros to make them have a fixed width of 7. By calling `requests.get`
+with each unique IMDb ID, I was able to add the Metascore and IMDb user score to each movie in the cleaned table. 
+
+## Joining Tables in Spark
+
+As mentioned in **Data Sources** section, all the supporting tables like **movie_actors** can be joined to the main table by *movieID* column. Since we already
+removed duplicated movie records from the main table, there won't be any redundant or misleading rows as long as we use `INNER JOIN` in the SQL commands. The main
+table is used in all analyses in this project, while other tables are joined when the need arises in each specific task. Because most of the analyses relies
+heavily on averaging and/or ranking review scores, we will leave the specific SQL operations to the next section.
+
 # Analysis and Visualization
 
-### Trends by Year
+## Exploratory Analysis on Temporal Trends and Genres Comparison
 
-```{r trends}
-trends = read_delim('output/trends.tsv', delim = '\t')
-ggplot(trends, aes(x = year, y = Metascore)) + geom_line() + theme_custom()
-ggplot(trends, aes(x = year, y = imdbRating)) + geom_line() + theme_custom()
+### Trends of average scores by year
+
+
+
+```{r trends, fig.height=6, fig.width=8}
+trends = read_delim('output/trends.tsv', delim = '\t') %>%
+  mutate(Tomatometer = as.numeric(rtAllCritScore),
+         `RT Audience` = as.numeric(rtAudScore),
+         Metascore = as.numeric(Metascore), `IMDb Score` = imdbRating) %>%
+  select(Year, Metascore, `IMDb Score`, Tomatometer, `RT Audience`)
+trends_facet = trends %>% gather(key = Rating, value = Score, Metascore:`RT Audience`) %>%
+  mutate(Rating = factor(Rating, levels = c("Metascore", "IMDb Score", "Tomatometer", "RT Audience")))
+ggplot(trends_facet, aes(Year, Score)) + geom_line(color = '#386cb0') +
+  geom_point(size = 0.5, color = '#386cb0') +
+  facet_wrap(~ Rating) + theme_custom()
 ```
+
+### Distributions across different genres
 
 ```{r genres, fig.height=6, fig.width=8}
 genres = read_delim("output/genres.tsv", delim = "\t") %>% 
   mutate(Tomatometer = as.numeric(rtAllCriticsScore), 
         `RT Audience` = as.numeric(rtAudienceScore), 
          Metascore = as.numeric(Metascore), `IMDb Score` = imdbRating) %>%
-  filter(genre != "Short") %>% # only one under Short genre and has no Metascore
-  select(genre, Metascore, `IMDb Score`, Tomatometer, `RT Audience`)
+  filter(Genre != "Short") %>% # only one under Short genre and has no Metascore
+  select(Genre, Metascore, `IMDb Score`, Tomatometer, `RT Audience`)
 genres_facet = genres %>% gather(key = Rating, value = Score, Metascore:`RT Audience`) %>%
   filter(!is.na(Score) & Score > 0) %>% 
   mutate(Rating = factor(Rating, levels = c("Metascore", "IMDb Score", "Tomatometer", "RT Audience")))
-ggplot(genres_facet, aes(genre, Score, color = genre)) + geom_boxplot() + coord_flip() +
-  facet_wrap(~ Rating) + theme_custom() + theme(legend.position = "none")
+ggplot(genres_facet, aes(Genre, Score, color = Genre)) + geom_boxplot() + coord_flip() +
+  facet_wrap(~ Rating) + theme_custom(legend = FALSE) + scale_color_tableau(palette = 'tableau20')
 ```
 
 # Conclusion
