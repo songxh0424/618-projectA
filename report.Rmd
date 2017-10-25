@@ -1,5 +1,5 @@
 ---
-title: "Analyzing Movies Rating Systems on \nIMDB and Rotten Tomatoes"
+title: "Analyzing Movie Scores on IMDb and Rotten Tomatoes"
 output: 
   pdf_document:
     number_sections: true
@@ -14,7 +14,7 @@ urlcolor: blue
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE, fig.align = "center", message = FALSE, warning = FALSE, comment = "  ", fig.pos = "H", cache = TRUE)
+knitr::opts_chunk$set(echo = FALSE, fig.align = "center", message = FALSE, warning = FALSE, comment = "  ", fig.pos = "H", cache = FALSE)
 library(knitr)
 library(ggplot2)
 library(gridExtra)
@@ -26,6 +26,7 @@ library(readr)
 library(ggthemes)
 library(grid)
 library(scales)
+library(wordcloud)
 ## theme_custom <- function(border = FALSE) {
 ##   t = theme(panel.grid.major=element_line(linetype='dotted',color='lightgrey'),
 ##        panel.grid.minor=element_blank(),
@@ -164,7 +165,9 @@ df = df %>% group_by(imdbID) %>% filter(row_number() == 1)
 This part is fairly straight-forward with the `requests` module. We only need to supply an API token and a valid IMDb ID to the url format to get the
 desired movie scores. The *imdbID* column in table **movies** is of numeric type, whereas a standard movie title ID takes the form "tt + a seven-digit integer".
 Therefore in this step I used the `format` function to pad the imdbID strings with leading zeros to make them have a fixed width of 7. By calling `requests.get`
-with each unique IMDb ID, I was able to add the Metascore and IMDb user score to each movie in the cleaned table. 
+with each unique IMDb ID, I was able to add the Metascore and IMDb user score to each movie in the cleaned table. Note that of all four scoring systems we are
+interested in, IMDb user score is the only one on a scale of 0-10. For the scores to be comparable, we multiplied IMDb user scores by 10 to put them on the
+same 0-100 scale as the other three scoring systems. 
 
 ## Joining Tables in Spark
 
@@ -177,11 +180,32 @@ heavily on averaging and/or ranking review scores, we will leave the specific SQ
 
 ## Exploratory Analysis on Temporal Trends and Genres Comparison
 
+The first analysis task is to get a first look at the distribution of these different scores. Histograms and density plots are great tools for visualizing
+distributions. But given that we have the data of around ten thousand movies across 20 different genres and a large time frame, it would be more meaningful
+to segment the data by year of release and by genre. The score trends can reveal the progression of movie qualities as perceived by different scoring systems,
+while the score differences across genres can indicate whether or not certain scoring platforms have preferences on particular type of movies.
+
 ### Trends of average scores by year
 
+This analysis can be done using the main table alone, as *year* is already a column in it. The JSON file of **movies** table is loaded in pyspark and registered
+as a table in `SQLContext`. We then run a SQL query on that table to group movies by year and get the average scores from year 1930 to 2009 (recall that we
+discarded the years with too few movies). The SQL command for this analysis is as follows:
 
+```sql
+SELECT year AS Year, AVG(rtAllCriticsScore) AS rtAllCritScore, AVG(rtAudienceScore) AS rtAudScore,
+        AVG(imdbRating) AS imdbRating, AVG(Metascore) AS Metascore, COUNT(id) AS count
+  FROM movies
+  GROUP BY year
+  ORDER BY year
+```
 
-```{r trends, fig.height=6, fig.width=8}
+Once we get the output, we can use pyspark command `df.toPandas().to_csv()` to convert the output table to `pandas DataFrame` and then save to a TSV file.
+All visualizations in this project are generated using R package `ggplot2`. Figure 1 is a plot showing the score trends from 1930 to 2009. It is worth
+mentioning that Metascore is usually much more selective than the other three, which means the number of movies having a Metascore tend to be smaller
+than the total number of movies in the dataset. This is especially true for older movies. And that is why the trend plot in Metascore panel is constantly
+"broken" before 1950. 
+
+```{r trends, fig.height=6, fig.width=8, fig.cap="Average movie scores by year"}
 trends = read_delim('output/trends.tsv', delim = '\t') %>%
   mutate(Tomatometer = as.numeric(rtAllCritScore),
          `RT Audience` = as.numeric(rtAudScore),
@@ -194,9 +218,60 @@ ggplot(trends_facet, aes(Year, Score)) + geom_line(color = '#386cb0') +
   facet_wrap(~ Rating) + theme_custom()
 ```
 
+There are a few interesting findings we can observe from Figure 1:
+
+* Both Metascore and Tomatometer display a very obvious declining trend. Granted that the people who put together the original dataset might have sampled
+more well-known movies for movies released in earlier days, but we do have a rich amount of data after year 1970 with at lease close to 100 movies per year,
+and the declining rate still seems to stay the same. Especially for the most recent three years 2007 to 2009, both plots indicate a sharp drop in the average
+scores. So at least according to movie critics, the average movie quality has been steadily declining over the last few decades.
+
+* On the other hand, the Rotten Tomatoes audience scores indicate an opposite view on the progression of movie qualities. The average audience scores
+fluctuate quite a lot prior to 1980s. After that, the scores have been steadily increasing until 2009. Note that Rotten Tomatoes was officially launched in 2000. 
+So the majority of average users are younger people who might not be familiar with older classics that came out before 1970s. It is also not a secret
+that, unlike critics, general movie viewers are better at enjoying the entertainment of a movie than its artistic values. So this is likely the reason why
+the critics scores and audience scores on Rotten Tomatoes have completely different trends.
+
+* Another thing worth mentioning in Figure 1 is that the IMDb score trend is almost flat in the entire time frame, with a barely visible declining pattern.
+Since the IMDb user score of a movie is calculated simply by averaging all user ratings, it is usually the least variable one out of four scores. It is quite
+common for a movie's IMDb user score to end up somewhere around 6 to 7.5. 
+
 ### Distributions across different genres
 
-```{r genres, fig.height=6, fig.width=8}
+To prepare data for this analysis, we need to join the **movie_genres** table to **movies** table. The SQL command is as follows:
+
+```sql
+SELECT m.rtAllCriticsScore, m.rtAudienceScore, m.imdbRating, m.Metascore, g.genre AS Genre
+  FROM movies AS m JOIN genres AS g ON m.id = g.movieID
+```
+
+Again, we saved the table as TSV file and loaded it in R. There are 20 genres in the dataset. While most of the genres each cover a good portion of our movies pool,
+the genre "Short" has only been assigned to one movie. Ignoring that movie leaves us with 19 genres and over 9000 movies. Boxplot is a nice option to visualize the
+distributions of 19 genres all at once. Figure 2 is a multipanel plot showing the boxplot of each scoring system within its own panel.
+
+The boxplots reveal some interesting insights regarding the differences among genres:
+
+* Horror is almost unanimously agreed by all four scoring systems as the worst genre. Action films are a close second. 
+
+* All scoring systems placed Film-Noir as the best genre, only in the case of Metascore that Documentary seems to be closely tied with Film-Noir. Documentary has
+a high score distribution in Tomatometer and Rotten Tomatoes audience score as well. 
+
+* Compared to other scores, Tomatometer appears to be particularly fond of Western genre. The quartiles of Western film scores are averagely high at best in the other
+three scoring systems, while according to Tomatometer, Western has the third highest median and the second highest third quartile of all 19 genres. 
+
+Besides those findings, Figure 2 also show us plenty of traits of each scoring systems:
+
+* The distributions of Tomatometer scores tend to cover almost the entire scale from 0 to 100 for all genres. All 19 genres have movies that reach 100 on Tomatometer.
+Film-Noir even has its third quartile reaching 100, which means 25% of movies in Film-Noir genres are given a perfect rating on Tomatometer. The Tomatometer scores also
+have the widest interquartile ranges (IQR). Many genres' IQRs cover half of the entire scale. On one hand, this means Tomatometer make use of the entire scale to 
+evaluate movie qualities. On the other hand, because Tomatometer score is essentially the percentage of critics that give the movie a positive review, the score can 
+easily goes to either end of the scale. After all, it is much easier for critics to agree on a binary choice than to agree on a specific score from 0 to 100. 
+
+* Similar to the flat pattern in its trend plot, the distribution of IMDb user score is almost invariable across different genres. IMDb user score also has the
+narrowest interquartile ranges of all four scores. It is also the only scoring system that does not have movies that reach 100. Personally I don't think these are bad
+things. Like I mentioned earlier, IMDb user score is simply the average of all submitted user ratings. This makes IMDb score more neutral than the others. General
+audience can get a sense of what average users feel about a movie, instead of being scared off by a terrifyingly low score or overhyped by a score close to 100. 
+
+```{r genres, fig.height=6, fig.width=8, fig.cap="Score distribution of different genres"}
 genres = read_delim("output/genres.tsv", delim = "\t") %>% 
   mutate(Tomatometer = as.numeric(rtAllCriticsScore), 
         `RT Audience` = as.numeric(rtAudienceScore), 
@@ -206,10 +281,156 @@ genres = read_delim("output/genres.tsv", delim = "\t") %>%
 genres_facet = genres %>% gather(key = Rating, value = Score, Metascore:`RT Audience`) %>%
   filter(!is.na(Score) & Score > 0) %>% 
   mutate(Rating = factor(Rating, levels = c("Metascore", "IMDb Score", "Tomatometer", "RT Audience")))
-ggplot(genres_facet, aes(Genre, Score, color = Genre)) + geom_boxplot() + coord_flip() +
-  facet_wrap(~ Rating) + theme_custom(legend = FALSE) + scale_color_tableau(palette = 'tableau20')
+ggplot(genres_facet, aes(Genre, Score, color = Genre)) + stat_boxplot(geom = "errorbar", width = 0.5) +
+  geom_boxplot() + coord_flip() + facet_wrap(~ Rating) +
+  theme_custom(legend = FALSE) + scale_color_tableau(palette = 'tableau20')
 ```
 
-# Conclusion
+## Ranking Director/Actor Duos
+
+It usually takes the combined effort of great directors and great actors to make extraordinary movies. In this analysis, the objective is to get rankings for director/actor
+duos based on their average movie scores. 
+
+First we need to construct a base table by joining tables **movies**, **actors** and **directors**. Because we mainly care about duos of director and leading actors, we
+add a condition to only use the rows in table **actors** that have a top 10 ranking. Here is the SQL command for joining the tables:
+
+```sql
+SELECT *
+  FROM movies AS m JOIN actors AS ma ON m.id = ma.movieID
+    JOIN directors AS md ON m.id = md.movieID
+  WHERE ma.ranking <= 10
+```
+
+The output of the above SQL query is then registered as table **duo_base** in SQLContext. Here we use Metascore as an example of getting the rankings. First we divide
+the rows of **duo_base** into groups, each of which is associated with a unique director/actor pair. We can use columns *directorID* and *actorID* to determine unique
+duos. Due to the fact that some movies don't have Metascores (such movies have "N/A" in their *Metascore* field), we also need a `WHERE` clause to exclude these records
+when averaging scores. A duo have to work on at least three movies together to be considered on the lists. As a result, the SQL query for this task looks like this:
+
+```sql
+SELECT FIRST(directorName) AS directorName, FIRST(actorName) AS actorName,
+       AVG(Metascore) AS Metascore, COUNT(imdbID) AS count
+  FROM duo_base
+  WHERE Metascore != 'N/A'
+  GROUP BY directorID, actorID
+  HAVING count >= 3
+  ORDER BY Metascore DESC
+```
+
+In order to save some space, here we only display the top 20 duos based on Metascore and IMDb user score. 
+
+```{r duos-meta}
+duo_meta = read_delim("output/duo_meta.tsv", delim = "\t")[1:20, ] %>%
+  mutate(Metascore = round(Metascore, digits = 2))
+colnames(duo_meta) = c("Director", "Actor", "Metascore", "No. of Movies")
+kable(duo_meta, row.names = TRUE, caption = "Top 20 director/actor duos based on Metascores")
+```
+
+
+```{r duos-imdb}
+duo_imdb = read_delim("output/duo_imdb.tsv", delim = "\t")[1:20, ] %>%
+  mutate(imdbRating = round(imdbRating, digits = 2))
+colnames(duo_imdb) = c("Director", "Actor", "IMDb score", "No. of Movies")
+Encoding(duo_imdb$Actor) = 'latin1'
+kable(duo_imdb, row.names = TRUE, caption = "Top 20 director/actor duos based on IMDb scores")
+```
+
+We can see plenty of familiar names on both lists. Francis Ford Coppola and Robert Duvall appear at the top of both lists. Francis Ford Coppola even have five entries
+on both lists with the same five actors. This is largely due to the success of the *Godfather* franchise. The same goes for Peter Jackson. Because of the critically acclaimed
+Lord of the Rings trilogy, He has five entries on both lists as well and all of them are from *Lord of the Rings* trilogy. Besides these two directors, there are some
+other famous duos on the lists as well, for example, Martin Scorsese/Robert De Niro and Woody Allen/Diane Keaton. Another interesting duo is Charles Chaplin/Charles Chaplin.
+Even though this is not technically a duo but I decided to leave it in the list because it is quite a feat to have directed and acted in four movies averaging 83 on IMDb.
+
+## Finding Movies with Polarizing Scores
+
+One of the first thing that piqued my interest in this project is that the movie *Twin Peaks: Fire Walk with Me* received a 72 on IMDb score but only got a 28 on Metascore.
+Even though the IMDb user score of a movie tends to be higher than its Metascore, a score difference of 44 is still astounding. Therefore in this section we will look into
+movies with a huge gap between their IMDb scores and Metascores. Note that we are only interested in movies with a much higher IMDb score, as a movie getting a much higher
+Metascore rarely happens. 
+
+### Movies with the largest score differences
+
+For the first step, we will simply compute the score difference and show movies with the 20 largest score differences. This only needs a straight-forward SQL query
+on the **movies** table and subtract column *Metascore* from column *imdbRating*. 
+
+```{r gap-top20}
+gap = read_delim("output/gap.tsv", delim = '\t') %>% select(-id)
+names(gap) = c("Title", "IMDb score", "Metascore", "Deference")
+kable(gap[1:20, ], row.names = TRUE, caption = "Top 20 largest score differences")
+```
+
+Many of the movies on Table 3 have an IMDb score over 70, which is usually a high enough score for a movie to be enjoyable. But they all get extremely low Metascores.
+Recall that Metascore is the weighted average of individual critic ratings. So a metascore as low as the ones in Table 2 means most critics find the movie horrible.
+In the next step we will dig a little deeper to find out what genres constantly receive polarizing scores. 
+
+### Polarizing movies by genre
+
+Assuming the table used by the last task is saved as `gap`, then we can join tables `gap` and `genres` by *movieID*. Here we arbitrarily set the threshold of score
+difference at 30, as we are mostly interested to see what genres tend to have exceedingly large score gaps. Below is the SQL command to count the number of movies 
+having a score gap larger than 30 in each genre:
+
+```sql
+SELECT genres.genre AS Genre, COUNT(gap.id) AS Count
+  FROM gap JOIN genres ON gap.id = genres.movieID
+  WHERE gap.gap >= 30
+  GROUP BY genre
+  ORDER BY Count DESC
+```
+
+Figure 3 is a bar chart that illustrates the results.
+
+```{r gap-genre, fig.cap="Bar chart of movies count by genre", fig.height=4, fig.width=7}
+gap_genre = read_delim("output/gap_genre.tsv", delim = '\t')
+genre_count = read_delim("output/genres_count.tsv", delim = '\t')
+gap_genre = bind_rows(gap_genre[1:10, ], gap_genre[-(1:10), ] %>% summarise(Count = sum(Count)) %>% mutate(Genre = "Other")) %>%
+  mutate(Genre = factor(Genre, levels = rev(Genre)))
+genre_count = genre_count %>% mutate(Genre = ifelse(Genre %in% gap_genre$Genre, Genre, 'Other')) %>%
+  group_by(Genre) %>% summarise(totalCount = sum(count)) %>% mutate(Genre = factor(Genre, levels = rev(gap_genre$Genre)))
+gap_genre = gap_genre %>% inner_join(genre_count, by = "Genre")
+ggplot(gap_genre, aes(Genre, Count, fill = Genre)) + geom_col(width = 0.8) + coord_flip() +
+  geom_label(aes(label = Count, fill = Genre), color = 'white', fontface = 'bold', vjust = 0.3, angle = 270, size = 3) + 
+  geom_label(aes(Genre, rep(0, nrow(gap_genre)), label = paste0(round(Count / totalCount * 100, digits = 1), '%')),
+             color = 'white', fontface = 'bold', vjust = 0.3, size = 3) +
+  theme_custom(legend = FALSE) + scale_fill_tableau(palette = 'tableau20')
+```
+
+In Figure 3, the labels on the right hand side indicate how many movies in each genre have a score gap larger than 30. The labels on the left hand side are the percentages
+of movies that have a score gap larger than 30 in each genre. Movies without either an IMDb score or a Metascore are excluded from the denominators when computing these
+percentages.
+
+From Figure 3, we can see that Comedy has a lot more polarizing movies than other genres. In fact, there are 183 movies that have a score difference larger than 30 (a movie
+can have multiple genres). This means sixty percent of those movies have comedy elements. This is not so far off from intuition. General audience usually judge a comedy
+movie by its ability to make people laugh, while critics consider far more standards than just decide whether or not the jokes are good.
+
+Even though Drama is a close second to Comedy when looking at just the movie count, this doesn't mean Drama films are prone to getting polarizing reviews as half the
+movies can be categorized as Drama. In order to investigate which genres are more likely to receive polarizing ratings, it is useful to look at the percentage of polarizing
+movies over the number of movies in each genre. According to the percentages, Crime, Comedy, Thriller, Action and Horror have a much higher chance than other genres to
+get polarizing scores. Similar to the discussion in section 4.1, these genres are usually entertaining for general audience to watch, but can have a harder time at getting
+praise from critics.
+
+
+```{r tagcloud, include=FALSE, eval=FALSE}
+tags = read_delim('output/gap_tag.tsv', delim = '\t')
+tags = tags %>% filter(count > 2)
+source('http://www.sthda.com/upload/rquery_wordcloud.r')
+res = rquery.wordcloud(paste(rep(tags$tag, tags$count), collapse = " "), type = 'text', lang = 'english')
+```
+
+# Challenges
+
+The main challenge in this project was the data cleaning process. There were a few inconspicuous data entry errors that didn't cause any script to break but silently
+altered the analysis results. For example, some actors' names were written in very messy format and rendered multiple following rows unable to be read into data frames.
+Similarly, duplicated movie records initially caused many problems in ranking director/actor duos. Both of these issues were only discovered after I closely inspected
+the outputs and tried to get verification by manually searching movie information through both websites and API. Eventually they were handled using Vim and `dplyr` package
+respectively, as already explained in **Data Manipulation Methods** section.
+
+Another major issue with the data is that the accuracy of Rotten Tomatoes data is questionable. The OCDF dataset was compiled in 2011, so the Rotten Tomatoes data was
+probably scraped during that time (Rotten Tomatoes data was not included in the original MovieLens dataset). A closer inspection at the data reveals that many movies
+have a very limited number of Rotten Tomatoes critics reviews. Therefore some movies have drastically different Tomatometer scores than they do today. For example,
+in our dataset, *Batman & Robin* only has one positive critics review and therefore has a perfect Tomatometer score at 100. However, its score on today's Rotten
+Tomatoes website is merely 10 and it's considered one of the worst movies of all time. There is no way to verify whether the data is completely false or it is simply
+because there weren't enough reviews back then. Unfortunately, I couldn't find a publicly available API to query up-to-date Rotten Tomatoes
+data for each movie. So eventually the analyses were carried out using the potentially faulty Rotten Tomatoes data. Furthermore, the last two analyses were performed
+on IMDb scores and Metascores only due to those analyses being more sensitive towards extreme scores, which happens more often in Rotten Tomato scoring system than IMDb
+scoring system.
 
 

@@ -54,9 +54,7 @@ years = sqlContext.sql(sql_years)
 years.toPandas().to_csv('output/years.tsv', sep = '\t', index = False)
 
 sql_trends = """
-SELECT year AS Year, AVG(rtAllCriticsRating) AS rtAllCritRating, AVG(rtTopCriticsRating) AS rtTopCritRating,
-       AVG(rtAllCriticsScore) AS rtAllCritScore, AVG(rtTopCriticsScore) AS rtTopCritScore,
-       AVG(rtAudienceRating) AS rtAudRating, AVG(rtAudienceScore) AS rtAudScore,
+SELECT year AS Year, AVG(rtAllCriticsScore) AS rtAllCritScore, AVG(rtAudienceScore) AS rtAudScore,
        AVG(imdbRating) AS imdbRating, AVG(Metascore) AS Metascore, COUNT(id) AS count
   FROM movies
   GROUP BY year
@@ -67,11 +65,21 @@ trends.toPandas().to_csv('output/trends.tsv', sep = '\t', index = False)
 
 # score distribution of each genre
 sql_genre = """
-SELECT m.rtAllCriticsScore, m.rtAudienceScore, m.imdbRating, m.Metascore, g.genre AS Genre
+SELECT m.year, m.title, m.rtAllCriticsScore, m.rtAudienceScore, m.imdbRating, m.Metascore, g.genre AS Genre
   FROM movies AS m JOIN genres AS g ON m.id = g.movieID
 """
 genres = sqlContext.sql(sql_genre)
 genres.toPandas().to_csv('output/genres.tsv', sep = '\t', index = False)
+
+genres.registerTempTable('genres_dat')
+sql_genre_count = """
+SELECT Genre, COUNT(Genre) AS count
+  FROM genres_dat
+  WHERE imdbRating != 'N/A' AND Metascore != 'N/A'
+  GROUP BY Genre
+"""
+genres_count = sqlContext.sql(sql_genre_count)
+genres_count.toPandas().to_csv('output/genres_count.tsv', sep = '\t', index = False)
 
 # 2.actors/directors with highest average scores, 3 movies or more
 # can also look at the actor/director duos, like Johnny Depp and Tim Burton
@@ -176,3 +184,43 @@ SELECT FIRST(directorName) AS directorName, FIRST(actorName) AS actorName,
 """
 duo_rtaud = sqlContext.sql(sql_duo_rtaud)
 duo_rtaud.toPandas().to_csv('output/duo_rtaud.tsv', sep = '\t', index = False, encoding = 'latin1')
+
+# 3.large gaps between metascore and tomatometer
+sql_gap = """
+SELECT id, title, imdbRating, Metascore, imdbRating - Metascore AS gap
+  FROM movies
+  WHERE imdbRating != 'N/A' AND Metascore != 'N/A'
+  ORDER BY gap DESC
+"""
+gap = sqlContext.sql(sql_gap)
+gap.registerTempTable('gap')
+gap.toPandas().to_csv('output/gap.tsv', sep = '\t', index = False, encoding = 'latin1')
+
+sql_gap_over30 = """
+SELECT *
+  FROM gap JOIN tags ON gap.id = tags.movieID
+    JOIN tag_map AS map ON tags.tagID = map.id
+  WHERE gap.gap >= 30
+"""
+gap_over30 = sqlContext.sql(sql_gap_over30)
+gap_over30.registerTempTable('gap_over30')
+gap_over30.toPandas().to_csv('output/gap_over30.tsv', sep = '\t', index = False, encoding = 'latin1')
+
+sql_gap_tag = """
+SELECT value AS tag, COUNT(value) AS count
+  FROM gap_over30
+  GROUP BY value
+  ORDER BY count DESC
+"""
+gap_tag = sqlContext.sql(sql_gap_tag)
+gap_tag.toPandas().to_csv('output/gap_tag.tsv', sep = '\t', index = False, encoding = 'latin1')
+
+sql_gap_genre = """
+SELECT genres.genre AS Genre, COUNT(gap.id) AS Count
+  FROM gap JOIN genres ON gap.id = genres.movieID
+  WHERE gap.gap >= 30
+  GROUP BY genre
+  ORDER BY Count DESC
+"""
+gap_genre = sqlContext.sql(sql_gap_genre)
+gap_genre.toPandas().to_csv('output/gap_genre.tsv', sep = '\t', index = False, encoding = 'latin1')
